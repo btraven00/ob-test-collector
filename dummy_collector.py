@@ -19,40 +19,95 @@ from typing import Dict, Any, List
 import statistics
 
 
+def parse_dynamic_args(argv):
+    """Parse command line arguments with support for dynamic flags.
+
+    Dynamic flags like --methods.result capture all arguments until the next flag.
+    """
+    # First pass: group arguments by flags
+    grouped_args = {}
+    current_flag = None
+    i = 0
+
+    while i < len(argv):
+        arg = argv[i]
+
+        if arg.startswith("--"):
+            # New flag found
+            current_flag = arg
+            grouped_args[current_flag] = []
+        elif current_flag:
+            # Argument belongs to current flag
+            grouped_args[current_flag].append(arg)
+        else:
+            # Positional argument (shouldn't happen with our usage)
+            if "__positional__" not in grouped_args:
+                grouped_args["__positional__"] = []
+            grouped_args["__positional__"].append(arg)
+
+        i += 1
+
+    return grouped_args
+
+
 def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Dummy metric collector")
+    """Parse command line arguments with support for dynamic flags."""
+    # Get raw arguments (excluding script name)
+    raw_args = sys.argv[1:]
 
-    # Standard collector parameters
-    parser.add_argument(
-        "--input-pattern",
-        default="**/*_data.json",
-        help="Glob pattern to find data files (default: **/*_data.json)",
-    )
-    parser.add_argument(
-        "--output_dir", required=True, help="Output directory for aggregated metrics"
-    )
-    parser.add_argument(
-        "--metric-key",
-        default="result",
-        help="Key to extract from each data file (default: result)",
-    )
-    parser.add_argument(
-        "--aggregation",
-        choices=["avg", "max", "min", "sum", "all"],
-        default="all",
-        help="Type of aggregation to perform (default: all)",
-    )
+    # Parse dynamic arguments
+    dynamic_args = parse_dynamic_args(raw_args)
 
-    # Additional parameters for testing
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-    parser.add_argument("--prefix", default="", help="Prefix for output metrics")
-    parser.add_argument("--collector", help="Collector mode flag (for compatibility)")
+    # Create a namespace to hold all arguments
+    args = argparse.Namespace()
 
-    # Catch-all for any other arguments
-    parser.add_argument("--extra", action="append", help="Extra parameters")
+    # Set defaults for known arguments
+    args.input_pattern = "**/*_data.json"
+    args.output_dir = None
+    args.metric_key = "result"
+    args.aggregation = "all"
+    args.debug = False
+    args.prefix = ""
+    args.collector = None
+    args.extra = []
+    args.name = None
 
-    return parser.parse_args()
+    # Store all dynamic arguments
+    args.dynamic_args = {}
+
+    # Process grouped arguments
+    for flag, values in dynamic_args.items():
+        flag_name = flag.lstrip("-").replace("-", "_")
+
+        # Handle known flags
+        if flag == "--input-pattern":
+            args.input_pattern = values[0] if values else args.input_pattern
+        elif flag == "--output_dir":
+            args.output_dir = values[0] if values else None
+        elif flag == "--metric-key":
+            args.metric_key = values[0] if values else args.metric_key
+        elif flag == "--aggregation":
+            if values and values[0] in ["avg", "max", "min", "sum", "all"]:
+                args.aggregation = values[0]
+        elif flag == "--debug":
+            args.debug = True  # Flag presence indicates True
+        elif flag == "--prefix":
+            args.prefix = values[0] if values else ""
+        elif flag == "--collector":
+            args.collector = values[0] if values else None
+        elif flag == "--extra":
+            args.extra.extend(values)
+        elif flag == "--name":
+            args.name = values[0] if values else None
+        else:
+            # Store unknown/dynamic arguments
+            args.dynamic_args[flag] = values
+
+    # Validate required arguments
+    if not args.output_dir:
+        raise SystemExit("Error: --output_dir is required")
+
+    return args
 
 
 def find_data_files(pattern: str, debug: bool = False) -> List[Path]:
@@ -148,9 +203,17 @@ def save_cli_debug(args: argparse.Namespace, output_dir: Path):
         "=== PARSED ARGUMENTS ===",
     ]
 
-    # Add all parsed arguments
+    # Add known arguments
     for key, value in vars(args).items():
-        cli_content.append(f"{key}: {value}")
+        if key != "dynamic_args":
+            cli_content.append(f"{key}: {value}")
+
+    # Add dynamic arguments
+    if hasattr(args, "dynamic_args") and args.dynamic_args:
+        cli_content.append("")
+        cli_content.append("=== DYNAMIC ARGUMENTS ===")
+        for flag, values in args.dynamic_args.items():
+            cli_content.append(f"{flag}: {values}")
 
     cli_content.extend(
         [
