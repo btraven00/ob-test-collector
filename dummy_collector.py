@@ -249,15 +249,43 @@ def main():
         print(f"Metric key: {args.metric_key}")
         print(f"Aggregation: {args.aggregation}")
 
-    # Find all data files using glob
-    data_files = find_data_files(args.input_pattern, args.debug)
+    # Check if --methods.result was provided with file paths
+    if hasattr(args, "dynamic_args") and "--methods.result" in args.dynamic_args:
+        # Use files from --methods.result
+        method_result_files = args.dynamic_args["--methods.result"]
+        data_files = []
+        for file_path in method_result_files:
+            path_obj = Path(file_path)
+            if path_obj.exists() and path_obj.is_file():
+                data_files.append(path_obj)
+                if args.debug:
+                    print(f"Using file from --methods.result: {file_path}")
+            elif args.debug:
+                print(f"File from --methods.result not found: {file_path}")
+
+        if args.debug:
+            print(
+                f"Using {len(data_files)} files from --methods.result instead of glob pattern"
+            )
+    else:
+        # Fall back to glob pattern search
+        if args.debug:
+            print("No --methods.result provided, using glob pattern search")
+        data_files = find_data_files(args.input_pattern, args.debug)
 
     if not data_files:
-        error_result = {
-            "error": f"No data files found with pattern: {args.input_pattern}",
-            "pattern_used": args.input_pattern,
-            "search_directory": str(Path.cwd().absolute()),
-        }
+        if hasattr(args, "dynamic_args") and "--methods.result" in args.dynamic_args:
+            error_result = {
+                "error": f"No valid files found in --methods.result",
+                "files_specified": args.dynamic_args["--methods.result"],
+                "search_directory": str(Path.cwd().absolute()),
+            }
+        else:
+            error_result = {
+                "error": f"No data files found with pattern: {args.input_pattern}",
+                "pattern_used": args.input_pattern,
+                "search_directory": str(Path.cwd().absolute()),
+            }
 
         # Still save the error result
         output_file = output_dir / "metrics.json"
@@ -295,11 +323,18 @@ def main():
     result = {
         "aggregation_type": args.aggregation,
         "metric_key": args.metric_key,
-        "input_pattern": args.input_pattern,
         "files_processed": len(file_info),
         "files_details": file_info,
         **aggregated,
     }
+
+    # Add source information
+    if hasattr(args, "dynamic_args") and "--methods.result" in args.dynamic_args:
+        result["source"] = "methods.result"
+        result["files_specified"] = args.dynamic_args["--methods.result"]
+    else:
+        result["source"] = "glob_pattern"
+        result["input_pattern"] = args.input_pattern
 
     # Add prefix if specified
     if args.prefix:
