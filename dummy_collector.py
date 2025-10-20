@@ -62,7 +62,7 @@ def parse_args():
     args = argparse.Namespace()
 
     # Set defaults for known arguments
-    args.input_pattern = "**/*_data.json"
+    args.input_pattern = "**/*_method.json"
     args.output_dir = None
     args.metric_key = "result"
     args.aggregation = "all"
